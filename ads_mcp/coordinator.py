@@ -43,6 +43,7 @@ if _CLIENT_ID and _CLIENT_SECRET:
             "https://www.googleapis.com/auth/userinfo.email",
             "https://www.googleapis.com/auth/userinfo.profile",
             "https://www.googleapis.com/auth/adwords",
+            "https://www.googleapis.com/auth/webmasters.readonly",
         ],
     }
     if _JWT_SIGNING_KEY:

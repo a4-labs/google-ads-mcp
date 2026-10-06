@@ -9,3 +9,4 @@ namespaces:
   metadata: true
   gsc: true
   write: true
+  keywords: true

@@ -53,6 +53,9 @@ if _CLIENT_ID and _CLIENT_SECRET:
 
     auth = GoogleProvider(**provider_kwargs)
     mcp = FastMCP("Google Ads Server", auth=auth)
+    from ads_mcp.access_control import EmailAllowlistMiddleware
+
+    mcp.add_middleware(EmailAllowlistMiddleware())
 else:
     mcp = FastMCP("Google Ads Server")
 

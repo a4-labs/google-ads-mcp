@@ -23,8 +23,16 @@ class _FakeService:
     def __init__(self):
         self.calls = []
 
-    def mutate(self, customer_id, mutate_operations, validate_only):
-        self.calls.append((customer_id, list(mutate_operations), validate_only))
+    def mutate(self, request):
+        # Same call shape as the real GoogleAdsServiceClient: a single
+        # MutateGoogleAdsRequest (validate_only is not a flattened argument).
+        self.calls.append(
+            (
+                request.customer_id,
+                list(request.mutate_operations),
+                request.validate_only,
+            )
+        )
         response = mock.Mock()
         response.mutate_operation_responses = []
         return response

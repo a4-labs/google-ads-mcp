@@ -238,11 +238,11 @@ def _run(
         "GoogleAdsService", interceptors=[MCPHeaderInterceptor()]
     )
     try:
-        response = service.mutate(
-            customer_id=customer_id,
-            mutate_operations=ops,
-            validate_only=not confirm,
-        )
+        request = client.get_type("MutateGoogleAdsRequest")
+        request.customer_id = customer_id
+        request.mutate_operations.extend(ops)
+        request.validate_only = not confirm
+        response = service.mutate(request=request)
     except GoogleAdsException as ex:
         raise ToolError(_format_ads_error(ex))
 

@@ -8,3 +8,4 @@ namespaces:
   search: true
   metadata: true
   gsc: true
+  write: true

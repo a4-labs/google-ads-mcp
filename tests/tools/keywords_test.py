@@ -114,5 +114,22 @@ class KeywordToolsTest(unittest.TestCase):
         self.assertEqual(row["monthly"], [{"year": 2026, "month": 9, "searches": 320}])
 
 
+class SearchBridgeTest(KeywordToolsTest):
+    def test_search_ideas_bridge(self):
+        import ads_mcp.tools.search as search_mod
+        rows = search_mod.search(
+            CID, fields=["kurs trenera"], resource="keyword_planner_ideas",
+            conditions=["url=https://a4academy.pl/vip/", "min_searches=100"], limit=10,
+        )
+        req = self.service.requests[0]
+        self.assertEqual(req.keyword_and_url_seed.url, "https://a4academy.pl/vip/")
+        self.assertEqual(len(rows), 1)
+
+    def test_search_volumes_bridge(self):
+        import ads_mcp.tools.search as search_mod
+        rows = search_mod.search(CID, fields=["kurs dietetyka"], resource="keyword_planner_volumes")
+        self.assertEqual(rows[0]["avg_monthly_searches"], 320)
+
+
 if __name__ == "__main__":
     unittest.main()

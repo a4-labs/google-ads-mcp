@@ -50,6 +50,9 @@ def search(
 
     customer_id = utils.clean_customer_id(customer_id)
 
+    if resource in KEYWORD_PLANNER_RESOURCES:
+        return _keyword_planner(customer_id, resource, fields, conditions, limit, login_customer_id)
+
     ga_service = utils.get_googleads_service(
         "GoogleAdsService", login_customer_id=login_customer_id
     )
@@ -90,6 +93,52 @@ def search(
         raise ToolError(
             f"Request ID: {ex.request_id}\n" + "\n".join(error_msgs)
         )
+
+
+# Keyword Planner via the search tool (A4 fork).
+# Lets clients whose tool list predates the `keywords` namespace use the
+# Keyword Planner through this already-known tool. Read-only.
+#   resource="keyword_planner_ideas":   fields = seed keywords (max 20),
+#       conditions = optional "url=https://...", "min_searches=100",
+#       "monthly=true", "geo=2616", "language=1030"; limit = max ideas.
+#   resource="keyword_planner_volumes": fields = keywords to check (max 1000),
+#       conditions = optional "monthly=false", "geo=...", "language=...".
+KEYWORD_PLANNER_RESOURCES = ("keyword_planner_ideas", "keyword_planner_volumes")
+
+
+def _keyword_planner(customer_id, resource, fields, conditions, limit, login_customer_id):
+    from ads_mcp.tools import keywords as kw
+
+    opts = {}
+    for cond in conditions or []:
+        if "=" not in cond:
+            raise ToolError(f"Keyword planner condition must be key=value, got: {cond}")
+        key, value = cond.split("=", 1)
+        opts[key.strip().lower()] = value.strip().strip("'\"")
+    geo = [int(g) for g in opts.get("geo", "2616").split(",") if g.strip()]
+    language = int(opts.get("language", "1030"))
+    if resource == "keyword_planner_ideas":
+        out = kw.ideas(
+            customer_id,
+            seed_keywords=list(fields),
+            page_url=opts.get("url") or None,
+            geo_target_ids=geo,
+            language_id=language,
+            min_monthly_searches=int(opts.get("min_searches", "0")),
+            limit=int(limit or 300),
+            include_monthly=opts.get("monthly", "false").lower() == "true",
+            login_customer_id=login_customer_id,
+        )
+        return out["ideas"]
+    out = kw.volumes(
+        customer_id,
+        keywords=list(fields),
+        geo_target_ids=geo,
+        language_id=language,
+        include_monthly=opts.get("monthly", "true").lower() == "true",
+        login_customer_id=login_customer_id,
+    )
+    return out["keywords"]
 
 
 def _search_tool_description() -> str:

@@ -11,10 +11,11 @@
 #   ADS_WRITE_ALLOWED_CUSTOMERS=123,.. - comma separated customer IDs that may
 #                                        be modified. Others are refused.
 #
-# Hard rules: campaigns, ad groups, ads, asset groups, budgets and conversion
+# Hard rules: campaigns, ad groups, asset groups, budgets and conversion
 # actions can never be removed (and never set to status REMOVED). Only
 # ENABLED / PAUSED. Removing is allowed only for criteria (negative keywords,
-# keywords, DSA webpage targets) and for unlinking assets from asset groups.
+# keywords, DSA webpage targets), for unlinking assets from asset groups and -
+# through the dedicated ads_remove tool only - for ads that are already PAUSED.
 
 """Tools for modifying a Google Ads account (preview -> confirm)."""
 
@@ -145,8 +146,12 @@ def _enum_name(message: Any, field: str) -> Optional[str]:
     return enum_value.name if enum_value else None
 
 
-def _guard_operations(ops: List[Any]) -> None:
-    """Raises if an operation would remove a protected object."""
+def _guard_operations(ops: List[Any], allow_remove: frozenset = frozenset()) -> None:
+    """Raises if an operation would remove a protected object.
+
+    `allow_remove` lists operation fields whose "remove" is permitted for the
+    calling tool (used only by ads_remove, which checks the ads itself).
+    """
     for op in ops:
         op_field = op._pb.WhichOneof("operation")
         if op_field is None:
@@ -154,7 +159,7 @@ def _guard_operations(ops: List[Any]) -> None:
         inner = getattr(op._pb, op_field)
         kind = inner.WhichOneof("operation")
         if op_field in _PROTECTED_OPERATIONS:
-            if kind == "remove":
+            if kind == "remove" and op_field not in allow_remove:
                 raise ToolError(
                     f"Usuwanie ({op_field}) jest zablokowane. Użyj statusu PAUSED."
                 )
@@ -213,6 +218,7 @@ def _run(
     confirm: bool,
     confirmation_id: Optional[str],
     login_customer_id: Union[str, int, None] = None,
+    allow_remove: frozenset = frozenset(),
 ) -> Dict[str, Any]:
     """Shared preview/confirm flow.
 
@@ -232,7 +238,7 @@ def _run(
         raise ToolError(
             f"Za dużo operacji ({len(ops)}). Maksimum na jedno wywołanie: {MAX_OPERATIONS}."
         )
-    _guard_operations(ops)
+    _guard_operations(ops, allow_remove)
 
     service = client.get_service(
         "GoogleAdsService", interceptors=[MCPHeaderInterceptor()]
@@ -431,6 +437,83 @@ def criteria_remove(
         return ops, summary, []
 
     return _run("criteria_remove", customer_id, params, build, confirm, confirmation_id, login_customer_id)
+
+
+@write_mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True))
+def ads_remove(
+    customer_id: Union[str, int],
+    resource_names: List[str],
+    confirm: bool = False,
+    confirmation_id: Optional[str] = None,
+    login_customer_id: Union[str, int, None] = None,
+) -> Dict[str, Any]:
+    """Removes ads (ad_group_ad) permanently. Only ads that are already PAUSED.
+
+    Enabled ads are refused - pause them first with status_set. Campaigns, ad
+    groups, asset groups, budgets and conversion actions still cannot be
+    removed by any tool.
+
+    Args:
+        resource_names: full ad resource names, e.g.
+            customers/123/adGroupAds/111~222 (ad group ID ~ ad ID).
+            Get them with the search tool first.
+        confirm / confirmation_id: preview -> confirm flow.
+    """
+    params = {"resource_names": resource_names}
+
+    def build(client, cid):
+        names = []
+        for rn in resource_names:
+            parts = rn.split("/")
+            if (
+                len(parts) != 4
+                or parts[0] != "customers"
+                or parts[1] != cid
+                or parts[2] != "adGroupAds"
+                or "~" not in parts[3]
+            ):
+                raise ToolError(
+                    f"Zły resource_name reklamy: {rn} (oczekiwano customers/{cid}/adGroupAds/<grupa>~<reklama>)"
+                )
+            names.append(rn)
+        if len(set(names)) != len(names):
+            raise ToolError("Powtórzone resource_name na liście.")
+        quoted = ", ".join(f"'{rn}'" for rn in names)
+        rows = _gaql(
+            client,
+            cid,
+            "SELECT ad_group_ad.resource_name, ad_group_ad.status FROM ad_group_ad "
+            f"WHERE ad_group_ad.resource_name IN ({quoted})",
+        )
+        statuses = {}
+        for row in rows:
+            status = row.ad_group_ad.status
+            statuses[row.ad_group_ad.resource_name] = getattr(status, "name", str(status))
+        ops, summary = [], []
+        for rn in names:
+            status = statuses.get(rn)
+            if status is None:
+                raise ToolError(f"Nie znaleziono reklamy {rn}.")
+            if status != "PAUSED":
+                raise ToolError(
+                    f"Reklama {rn} ma status {status}. Najpierw wstrzymaj ją (PAUSED), potem usuń."
+                )
+            op = _new_op(client)
+            op.ad_group_ad_operation.remove = rn
+            ops.append(op)
+            summary.append(f"Usuń wstrzymaną reklamę {rn}")
+        return ops, summary, []
+
+    return _run(
+        "ads_remove",
+        customer_id,
+        params,
+        build,
+        confirm,
+        confirmation_id,
+        login_customer_id,
+        allow_remove=frozenset({"ad_group_ad_operation"}),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1183,7 +1266,8 @@ def raw_mutate(
     Use only when no dedicated tool exists (e.g. creating a Performance Max
     campaign, a DSA ad, changing a bidding strategy). Same rules apply:
     preview first, then confirm; removing campaigns / ad groups / ads / asset
-    groups / budgets / conversion actions is blocked.
+    groups / budgets / conversion actions is blocked here. To remove paused
+    ads use the dedicated ads_remove tool.
 
     Args:
         operations: list of MutateOperation objects as JSON dicts (field names

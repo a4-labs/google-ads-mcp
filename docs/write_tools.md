@@ -26,6 +26,7 @@ Namespace `write` (enabled in `ads_mcp/tools_config.yaml`). Every tool works in 
 |---|---|
 | `negatives_add` | Negative keywords: account list, shared list, campaign or ad group |
 | `criteria_remove` | Removes negative keywords, keywords, DSA webpage targets |
+| `ads_remove` | Removes ads (ad_group_ad) that are already PAUSED; enabled ads are refused |
 | `keywords_add` | Adds keywords to a Search ad group |
 | `dsa_webpage_targets_add` | Adds DSA page targets or page exclusions |
 | `pmax_text_assets_add` | Adds headlines / long headlines / descriptions to a PMax asset group |

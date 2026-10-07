@@ -45,6 +45,23 @@ class _FakeService:
         return [batch]
 
 
+class _AdStatusService(_FakeService):
+    def __init__(self, statuses):
+        super().__init__()
+        self.statuses = statuses
+
+    def search_stream(self, customer_id, query):
+        batch = mock.Mock()
+        rows = []
+        for rn, status in self.statuses.items():
+            row = mock.Mock()
+            row.ad_group_ad.resource_name = rn
+            row.ad_group_ad.status.name = status
+            rows.append(row)
+        batch.results = rows
+        return [batch]
+
+
 class WriteToolsTest(unittest.TestCase):
     def setUp(self):
         write._PENDING.clear()
@@ -158,6 +175,41 @@ class WriteToolsTest(unittest.TestCase):
         self.assertEqual(result["mode"], "preview")
         op = self.service.calls[-1][1][0]
         self.assertIn("status", list(op.campaign_operation.update_mask.paths))
+
+    def _use_ad_statuses(self, statuses):
+        self.service = _AdStatusService(statuses)
+        self.client.get_service = mock.Mock(return_value=self.service)
+
+    def test_ads_remove_paused_ad(self):
+        rn = f"customers/{CID}/adGroupAds/1~2"
+        self._use_ad_statuses({rn: "PAUSED"})
+        result = write.ads_remove(customer_id=CID, resource_names=[rn])
+        self.assertEqual(result["mode"], "preview")
+        op = self.service.calls[-1][1][0]
+        self.assertEqual(op.ad_group_ad_operation.remove, rn)
+
+    def test_ads_remove_refuses_enabled_ad(self):
+        rn = f"customers/{CID}/adGroupAds/1~2"
+        self._use_ad_statuses({rn: "ENABLED"})
+        with self.assertRaises(ToolError):
+            write.ads_remove(customer_id=CID, resource_names=[rn])
+        self.assertEqual(self.service.calls, [])
+
+    def test_ads_remove_refuses_other_resources(self):
+        with self.assertRaises(ToolError):
+            write.ads_remove(
+                customer_id=CID, resource_names=[f"customers/{CID}/campaigns/1"]
+            )
+
+    def test_raw_mutate_still_blocks_ad_remove(self):
+        with self.assertRaises(ToolError):
+            write.raw_mutate(
+                customer_id=CID,
+                operations=[
+                    {"ad_group_ad_operation": {"remove": f"customers/{CID}/adGroupAds/1~2"}}
+                ],
+                description="test",
+            )
 
 
 if __name__ == "__main__":
